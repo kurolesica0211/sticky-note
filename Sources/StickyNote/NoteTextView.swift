@@ -2,7 +2,7 @@ import AppKit
 import NoteCore
 
 final class NoteTextView: NSTextView {
-    var onChange: ((String) -> Void)?
+    var onChange: ((String, Data?) -> Void)?
     var onFinish: (() -> Void)?
     var onEdit: (() -> Void)?
     var desktopMode = false
@@ -11,7 +11,7 @@ final class NoteTextView: NSTextView {
 
     convenience init() {
         self.init(frame: .zero)
-        isRichText = false
+        isRichText = true
         importsGraphics = false
         allowsUndo = true
         drawsBackground = false
@@ -39,17 +39,29 @@ final class NoteTextView: NSTextView {
         }
     }
 
-    func setBody(_ body: String) {
-        if string != body { string = body }
+    func setBody(_ body: String, richText: Data? = nil) {
+        if let richText,
+           let formatted = try? NSAttributedString(data: richText, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil),
+           formatted.string == body {
+            textStorage?.setAttributedString(formatted)
+        } else {
+            textStorage?.setAttributedString(NSAttributedString(string: body, attributes: [.font: Paper.font]))
+        }
         restyle()
         needsDisplay = true
+    }
+
+    var richTextData: Data? {
+        guard !string.isEmpty else { return nil }
+        return try? textStorage?.data(from: NSRange(location: 0, length: (string as NSString).length),
+                                      documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
     }
 
     override func didChangeText() {
         super.didChangeText()
         guard !isApplyingStyle else { return }
         restyle()
-        onChange?(string)
+        onChange?(string, richTextData)
         needsDisplay = true
     }
 
@@ -60,7 +72,20 @@ final class NoteTextView: NSTextView {
         paragraph.lineSpacing = 5
         let attributes: [NSAttributedString.Key: Any] = [.font: Paper.font, .foregroundColor: Paper.ink, .paragraphStyle: paragraph]
         storage.beginEditing()
-        storage.setAttributes(attributes, range: NSRange(location: 0, length: storage.length))
+        let fullRange = NSRange(location: 0, length: storage.length)
+        var fonts: [(NSRange, NSFont)] = []
+        storage.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+            let traits = NSFontManager.shared.traits(of: value as? NSFont ?? Paper.font)
+            var font = Paper.font
+            if traits.contains(.boldFontMask) { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
+            if traits.contains(.italicFontMask) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
+            fonts.append((range, font))
+        }
+        storage.removeAttribute(.strikethroughStyle, range: fullRange)
+        storage.removeAttribute(.link, range: fullRange)
+        storage.removeAttribute(.underlineStyle, range: fullRange)
+        storage.addAttributes([.foregroundColor: Paper.ink, .paragraphStyle: paragraph], range: fullRange)
+        for (range, font) in fonts { storage.addAttribute(.font, value: font, range: range) }
         let source = string as NSString
         var offset = 0
         while offset < source.length {
@@ -73,8 +98,55 @@ final class NoteTextView: NSTextView {
             offset = NSMaxRange(range)
         }
         storage.endEditing()
-        typingAttributes = attributes
+        var typing = attributes
+        typing[.font] = typingAttributes[.font] as? NSFont ?? Paper.font
+        typingAttributes = typing
         isApplyingStyle = false
+    }
+
+    @objc func toggleBold() { toggle(.boldFontMask, name: "Bold") }
+    @objc func toggleItalic() { toggle(.italicFontMask, name: "Italic") }
+
+    private func toggle(_ trait: NSFontTraitMask, name: String) {
+        let manager = NSFontManager.shared
+        let range = selectedRange()
+        guard range.length > 0, let storage = textStorage else {
+            let font = typingAttributes[.font] as? NSFont ?? Paper.font
+            typingAttributes[.font] = manager.traits(of: font).contains(trait)
+                ? manager.convert(font, toNotHaveTrait: trait) : manager.convert(font, toHaveTrait: trait)
+            window?.makeFirstResponder(self)
+            return
+        }
+        let previous = NSAttributedString(attributedString: storage)
+        var allHaveTrait = true
+        storage.enumerateAttribute(.font, in: range) { value, _, _ in
+            if !manager.traits(of: value as? NSFont ?? Paper.font).contains(trait) { allHaveTrait = false }
+        }
+        var changes: [(NSRange, NSFont)] = []
+        storage.enumerateAttribute(.font, in: range) { value, subrange, _ in
+            let font = value as? NSFont ?? Paper.font
+            changes.append((subrange, allHaveTrait ? manager.convert(font, toNotHaveTrait: trait) : manager.convert(font, toHaveTrait: trait)))
+        }
+        undoManager?.registerUndo(withTarget: self) { $0.restore(previous, selection: range) }
+        undoManager?.setActionName(name)
+        storage.beginEditing()
+        for (subrange, font) in changes { storage.addAttribute(.font, value: font, range: subrange) }
+        storage.endEditing()
+        restyle()
+        setSelectedRange(range)
+        onChange?(string, richTextData)
+        window?.makeFirstResponder(self)
+    }
+
+    private func restore(_ text: NSAttributedString, selection: NSRange) {
+        guard let storage = textStorage else { return }
+        let previous = NSAttributedString(attributedString: storage)
+        let previousSelection = selectedRange()
+        undoManager?.registerUndo(withTarget: self) { $0.restore(previous, selection: previousSelection) }
+        storage.setAttributedString(text)
+        restyle()
+        setSelectedRange(selection)
+        onChange?(string, richTextData)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -100,13 +172,13 @@ final class NoteTextView: NSTextView {
         let glyphs = layoutManager.glyphRange(forCharacterRange: prefixRange, actualCharacterRange: nil)
         let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer).insetBy(dx: -3, dy: -2)
         guard rect.contains(point) else { return false }
-        let replacement = Checklist.toggled(source.substring(with: line))
+        let replacement = item.checked ? "☐ " : "☑ "
         if desktopMode {
-            string = source.replacingCharacters(in: line, with: replacement)
+            textStorage?.replaceCharacters(in: prefixRange, with: replacement)
             restyle()
-            onChange?(string)
+            onChange?(string, richTextData)
         } else {
-            replace(line, with: replacement)
+            replace(prefixRange, with: replacement)
         }
         return true
     }
@@ -143,16 +215,15 @@ final class NoteTextView: NSTextView {
         if event.keyCode == 53 || (event.keyCode == 36 && event.modifierFlags.contains(.command)) {
             onFinish?(); return
         }
-        if event.charactersIgnoringModifiers == "l" && event.modifierFlags.contains([.command, .shift]) {
+        if event.charactersIgnoringModifiers?.lowercased() == "l" && event.modifierFlags.contains([.command, .shift]) {
             addCheckbox(); return
         }
+        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "b" { toggleBold(); return }
+        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "i" { toggleItalic(); return }
         super.keyDown(with: event)
     }
 
     private func replace(_ range: NSRange, with text: String) {
-        guard shouldChangeText(in: range, replacementString: text) else { return }
-        textStorage?.replaceCharacters(in: range, with: text)
-        setSelectedRange(NSRange(location: range.location + (text as NSString).length, length: 0))
-        didChangeText()
+        insertText(text, replacementRange: range)
     }
 }

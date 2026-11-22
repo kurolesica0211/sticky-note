@@ -13,6 +13,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var activationObserver: NSObjectProtocol?
     private var saveError: Error?
     private var loaded = false
+    private var deletePicker: DeletePickerController?
+    private var pendingDelete = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -38,6 +40,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ) { [weak self] notification in
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+                  app.bundleIdentifier != "io.github.kurolesica0211.StickyNote.Delete",
                   app.bundleIdentifier != "com.apple.Spotlight" else { return }
             self?.previousApp = app
         }
@@ -49,13 +52,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         makeDesktop()
-        if !arguments.contains("--restore-only") { newNote() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.pendingDelete || arguments.contains("--delete") { self.showDeletePicker() }
+            else if !arguments.contains("--restore-only") && self.editor == nil && self.deletePicker == nil { self.newNote() }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard loaded else { return false }
+        if deletePicker != nil { deletePicker?.show(); return false }
         newNote()
         return false
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard urls.contains(where: { $0.scheme == "stickynote" && $0.host == "delete" }) else { return }
+        pendingDelete = true
+        if loaded { showDeletePicker() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -100,7 +114,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let controller = DesktopController(note: note, screen: screen)
         controller.onEdit = { [weak self] in self?.edit(note.id) }
         controller.onDelete = { [weak self] in self?.delete(note.id) }
-        controller.onChange = { [weak self] body in self?.update(note.id, body: body) }
+        controller.onChange = { [weak self] body, richText in self?.update(note.id, body: body, richText: richText) }
         controller.onPlacement = { [weak self] placement in
             guard let self, let index = self.notes.firstIndex(where: { $0.id == note.id }) else { return }
             self.notes[index].placement = placement
@@ -121,7 +135,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let rows = max(1, Int((area.height - 40) / 270))
         let index = notes.count % (columns * rows)
         let placement = Placement(x: 32 + Double(index % columns) * 300,
-                                  y: 32 + Double(index / columns) * 270)
+                                  y: 32 + Double(index / columns) * 270, width: 400, height: 320)
             .clamped(toWidth: area.width, height: area.height)
         let note = Note(placement: placement)
         draft = note
@@ -140,20 +154,38 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func presentEditor(_ note: Note, isNew: Bool) {
         guard let screen = DesktopGeometry.screen else { return }
+        deletePicker?.window?.orderOut(nil)
+        deletePicker = nil
         let controller = EditorController(note: note, isNew: isNew)
-        controller.onChange = { [weak self] body in self?.update(note.id, body: body) }
+        controller.onChange = { [weak self] body, richText in self?.update(note.id, body: body, richText: richText) }
+        controller.onResize = { [weak self] size in
+            guard let self else { return }
+            if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+                self.notes[index].placement.width = size.width
+                self.notes[index].placement.height = size.height
+                if let screen = DesktopGeometry.screen {
+                    self.cards[note.id]?.place(self.notes[index].placement, on: screen)
+                }
+            } else if self.draft?.id == note.id {
+                self.draft?.placement.width = size.width
+                self.draft?.placement.height = size.height
+            }
+            _ = self.persist()
+        }
         controller.onFinish = { [weak self] in _ = self?.finishEditor() }
         controller.onDelete = { [weak self] in self?.delete(note.id) }
         editor = controller
         controller.show(on: screen)
     }
 
-    private func update(_ id: UUID, body: String) {
+    private func update(_ id: UUID, body: String, richText: Data?) {
         if let index = notes.firstIndex(where: { $0.id == id }) {
             notes[index].body = body
+            notes[index].richText = richText
             cards[id]?.update(notes[index])
         } else if var note = draft, note.id == id {
             note.body = body
+            note.richText = richText
             draft = note
             if !note.isEmpty { notes.append(note) }
         }
@@ -171,10 +203,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
-    private func delete(_ id: UUID) {
+    @discardableResult private func delete(_ id: UUID) -> Bool {
         let remaining = notes.filter { $0.id != id }
         do { try store.save(remaining) }
-        catch { saveError = error; showSaveError(); return }
+        catch { saveError = error; showSaveError(); return false }
         notes = remaining
         saveError = nil
         if let card = cards.removeValue(forKey: id), let window = card.window {
@@ -187,6 +219,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             draft = nil
             previousApp?.activate(options: [])
         }
+        return true
+    }
+
+    @objc private func showDeletePicker() {
+        pendingDelete = false
+        guard finishEditor(restoreFocus: false) else { return }
+        if let deletePicker { deletePicker.show(); return }
+        let picker = DeletePickerController(notes: notes)
+        picker.onDelete = { [weak self] id in self?.delete(id) ?? false }
+        picker.onClose = { [weak self] in
+            self?.deletePicker = nil
+            self?.previousApp?.activate(options: [])
+        }
+        deletePicker = picker
+        picker.show()
     }
 
     @discardableResult private func persist() -> Bool {
@@ -216,6 +263,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         let new = menu.addItem(withTitle: "New Sticky Note", action: #selector(newNote), keyEquivalent: "n")
         new.target = self
+        let delete = menu.addItem(withTitle: "Delete a Note…", action: #selector(showDeletePicker), keyEquivalent: "")
+        delete.target = self
         menu.addItem(.separator())
         for note in notes {
             let item = menu.addItem(withTitle: note.title, action: #selector(openFromMenu(_:)), keyEquivalent: "")
@@ -247,6 +296,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let appItem = NSMenuItem(); appItem.submenu = app; main.addItem(appItem)
         let file = NSMenu(title: "File")
         let new = file.addItem(withTitle: "New Sticky Note", action: #selector(newNote), keyEquivalent: "n"); new.target = self
+        let delete = file.addItem(withTitle: "Delete a Note…", action: #selector(showDeletePicker), keyEquivalent: "d")
+        delete.keyEquivalentModifierMask = [.command, .shift]; delete.target = self
         let fileItem = NSMenuItem(); fileItem.submenu = file; main.addItem(fileItem)
         let edit = NSMenu(title: "Edit")
         for (title, action, key) in [
@@ -255,6 +306,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ("Paste", #selector(NSText.paste(_:)), "v"), ("Select All", #selector(NSText.selectAll(_:)), "a")
         ] { edit.addItem(withTitle: title, action: action, keyEquivalent: key) }
         let editItem = NSMenuItem(); editItem.submenu = edit; main.addItem(editItem)
+        let format = NSMenu(title: "Format")
+        format.addItem(withTitle: "Bold", action: #selector(NoteTextView.toggleBold), keyEquivalent: "b")
+        format.addItem(withTitle: "Italic", action: #selector(NoteTextView.toggleItalic), keyEquivalent: "i")
+        let formatItem = NSMenuItem(); formatItem.submenu = format; main.addItem(formatItem)
         NSApp.mainMenu = main
     }
 

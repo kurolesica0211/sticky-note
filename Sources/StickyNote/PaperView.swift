@@ -1,4 +1,5 @@
 import AppKit
+import NoteCore
 
 enum Paper {
     static let ink = NSColor(srgbRed: 0.25, green: 0.20, blue: 0.10, alpha: 1)
@@ -21,10 +22,31 @@ enum Paper {
 
 final class PaperView: NSView {
     var onDrag: ((NSEvent) -> Void)?
-    var onResize: ((NSEvent) -> Void)?
+    var onResize: ((NSEvent, ResizeEdges) -> Void)?
     var showsFold = true
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
+
+    private func edges(at point: NSPoint) -> ResizeEdges {
+        var edges: ResizeEdges = []
+        let margin: CGFloat = 7
+        if point.x < margin { edges.insert(.left) }
+        if point.x > bounds.width - margin { edges.insert(.right) }
+        if point.y < margin { edges.insert(.top) }
+        if point.y > bounds.height - margin { edges.insert(.bottom) }
+        if showsFold && point.x > bounds.width - 22 && point.y > bounds.height - 22 {
+            edges.formUnion([.right, .bottom])
+        }
+        return edges
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        if bounds.contains(local), onResize != nil, !edges(at: local).isEmpty { return self }
+        return super.hitTest(point)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
         Paper.background.setFill()
@@ -52,8 +74,9 @@ final class PaperView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if showsFold && point.x > bounds.width - 24 && point.y > bounds.height - 24 {
-            onResize?(event)
+        let edges = edges(at: point)
+        if !edges.isEmpty, onResize != nil {
+            onResize?(event, edges)
         } else if point.y < 42 {
             onDrag?(event)
         }
@@ -61,5 +84,25 @@ final class PaperView: NSView {
 
     override func resetCursorRects() {
         addCursorRect(NSRect(x: 0, y: 0, width: max(0, bounds.width - 80), height: 40), cursor: .openHand)
+        guard onResize != nil else { return }
+        addCursorRect(NSRect(x: 0, y: 0, width: 7, height: bounds.height), cursor: .resizeLeftRight)
+        addCursorRect(NSRect(x: bounds.width - 7, y: 0, width: 7, height: bounds.height), cursor: .resizeLeftRight)
+        addCursorRect(NSRect(x: 0, y: 0, width: bounds.width, height: 7), cursor: .resizeUpDown)
+        addCursorRect(NSRect(x: 0, y: bounds.height - 7, width: bounds.width, height: 7), cursor: .resizeUpDown)
     }
+}
+
+func resizePaperWindow(_ window: NSWindow, event: NSEvent, edges: ResizeEdges, minimum: NSSize) {
+    guard let screen = DesktopGeometry.screen else { return }
+    let original = window.frame
+    // Use the original mouse-down position even if a fast drag is already queued.
+    let start = window.convertPoint(toScreen: event.locationInWindow)
+    while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+        let mouse = window.convertPoint(toScreen: next.locationInWindow)
+        let frame = ResizeGeometry.resize(original, edges: edges, dx: mouse.x - start.x, dy: mouse.y - start.y,
+                                          minimum: minimum, within: screen.visibleFrame)
+        window.setFrame(frame, display: true)
+        if next.type == .leftMouseUp { break }
+    }
+    window.invalidateCursorRects(for: window.contentView!)
 }

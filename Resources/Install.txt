@@ -1,0 +1,36 @@
+Sticky Note 0.2.0
+macOS 14 or later • Apple silicon and Intel
+
+INSTALL
+Copy both “Sticky Note.app” and “Delete Sticky Note.app” into Applications.
+Keep them together in the same folder. No developer tools are needed.
+Quit an older running copy before replacing it. Your local notes are kept.
+
+FIRST OPEN
+This free build is ad-hoc signed, not Apple-notarized.
+After trying to open an app, if macOS blocks it, open System Settings >
+Privacy & Security, scroll to the security message, and choose Open Anyway.
+Repeat for the Delete Sticky Note launcher if prompted. Do this only for
+a copy you trust, downloaded from the official repository:
+https://github.com/kurolesica0211/sticky-note/releases
+Apple's instructions: https://support.apple.com/en-us/102445
+
+USE
+Spotlight > “Sticky Note” > Return: create a note.
+Spotlight > “Delete Sticky Note” > Return: open the searchable delete list.
+If Spotlight has not indexed the apps yet, open each once from Applications.
+
+Command-B: bold. Command-I: italic. Shift-Command-L: checkbox.
+Command-Return or Escape: place your note on the desktop.
+Drag the header to move a note; drag any edge or corner to resize it.
+The editor follows you across Spaces; saved stickers stay on one desktop.
+In the delete list: type to search, Up/Down to select, Command-Delete to
+remove the selected note, Escape to close. Deletion is immediate.
+
+LOCAL DATA
+Notes stay on this Mac in:
+~/Library/Application Support/StickyNote/notes.json
+No accounts, network requests, cloud sync, or automatic deletion.
+To move notes to a different Mac, quit the app on both Macs and copy this
+file into the same location. Version 0.2 uses a new format for bold/italic;
+do not open that file with version 0.1.

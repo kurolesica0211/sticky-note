@@ -53,7 +53,7 @@ final class NoteCoreTests {
         let (store, directory) = try temporaryStore()
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try Data("{\"version\":2,\"notes\":[]}".utf8).write(to: store.fileURL)
+        try Data("{\"version\":3,\"notes\":[]}".utf8).write(to: store.fileURL)
         try XCTAssertThrowsError(try store.load())
     }
 
@@ -83,6 +83,51 @@ final class NoteCoreTests {
         try XCTAssertTrue(Note(body: " \n\t ").isEmpty)
         try XCTAssertFalse(Note(body: "☐ Task").isEmpty)
     }
+
+    func testVersionOneNotesLoadWithoutFormatting() throws {
+        let (store, directory) = try temporaryStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let id = UUID()
+        let old = "{\"version\":1,\"notes\":[{\"id\":\"\(id)\",\"body\":\"Existing note\",\"placement\":{\"x\":32,\"y\":32,\"width\":280,\"height\":250}}]}"
+        try Data(old.utf8).write(to: store.fileURL)
+        let loaded = try store.load()
+        try XCTAssertEqual(loaded.first?.body, "Existing note")
+        try XCTAssertNil(loaded.first?.richText)
+        try store.save(loaded)
+        try XCTAssertEqual(try store.load(), loaded)
+    }
+
+    func testFormattingPayloadRoundTrip() throws {
+        let (store, directory) = try temporaryStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let note = Note(body: "Bold", richText: Data("{\\rtf1\\ansi \\b Bold}".utf8))
+        try store.save([note])
+        try XCTAssertEqual(try store.load(), [note])
+    }
+
+    func testResizingKeepsOppositeEdgesFixed() throws {
+        let frame = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let bounds = CGRect(x: 0, y: 0, width: 1200, height: 900)
+        let minimum = CGSize(width: 220, height: 160)
+        let left = ResizeGeometry.resize(frame, edges: .left, dx: -50, dy: 0, minimum: minimum, within: bounds)
+        try XCTAssertEqual(left, CGRect(x: 50, y: 100, width: 450, height: 300))
+        let top = ResizeGeometry.resize(frame, edges: .top, dx: 0, dy: 70, minimum: minimum, within: bounds)
+        try XCTAssertEqual(top, CGRect(x: 100, y: 100, width: 400, height: 370))
+        let corner = ResizeGeometry.resize(frame, edges: [.right, .bottom], dx: 80, dy: -30, minimum: minimum, within: bounds)
+        try XCTAssertEqual(corner, CGRect(x: 100, y: 70, width: 480, height: 330))
+    }
+
+    func testResizeRespectsMinimumAndScreenEdges() throws {
+        let frame = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let bounds = CGRect(x: 0, y: 0, width: 1200, height: 900)
+        let minimum = CGSize(width: 220, height: 160)
+        let small = ResizeGeometry.resize(frame, edges: [.left, .bottom], dx: 1000, dy: 1000, minimum: minimum, within: bounds)
+        try XCTAssertEqual(small, CGRect(x: 280, y: 240, width: 220, height: 160))
+        let large = ResizeGeometry.resize(frame, edges: [.right, .top], dx: 5000, dy: 5000, minimum: minimum, within: bounds)
+        try XCTAssertEqual(large.maxX, bounds.maxX)
+        try XCTAssertEqual(large.maxY, bounds.maxY)
+    }
 }
 
 let suite = NoteCoreTests()
@@ -94,7 +139,11 @@ let checks: [(String, () throws -> Void)] = [
     ("Monitor disconnect keeps notes on screen", suite.testASecondDisplayDisconnectCannotLeaveNotesOffscreen),
     ("Invalid geometry stays usable", suite.testSmallScreenAndInvalidGeometryRemainUsable),
     ("Checkbox toggles preserve text", suite.testCheckboxToggleDoesNotDamageTextOrNewlines),
-    ("Empty drafts", suite.testEmptyAndWhitespaceDraftsAreRecognized)
+    ("Empty drafts", suite.testEmptyAndWhitespaceDraftsAreRecognized),
+    ("Version 0.1 notes migrate without losing text", suite.testVersionOneNotesLoadWithoutFormatting),
+    ("Formatting payload survives storage", suite.testFormattingPayloadRoundTrip),
+    ("Edge resizing preserves the opposite edge", suite.testResizingKeepsOppositeEdgesFixed),
+    ("Resize limits stay on screen", suite.testResizeRespectsMinimumAndScreenEdges)
 ]
 var failures = 0
 for (name, check) in checks {

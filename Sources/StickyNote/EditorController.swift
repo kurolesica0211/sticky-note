@@ -10,13 +10,16 @@ final class EditorPanel: NSPanel {
 final class EditorController: NSWindowController, NSWindowDelegate {
     let noteID: UUID
     let textView = NoteTextView()
-    var onChange: ((String) -> Void)?
+    var onChange: ((String, Data?) -> Void)?
+    var onResize: ((NSSize) -> Void)?
     var onFinish: (() -> Void)?
     var onDelete: (() -> Void)?
     private let footer = NSTextField(labelWithString: "Saved on this Mac")
+    private let initialSize: NSSize
 
     init(note: Note, isNew: Bool) {
         noteID = note.id
+        initialSize = NSSize(width: max(380, note.placement.width), height: max(240, note.placement.height))
         let panel = EditorPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 360),
                                 styleMask: [.borderless], backing: .buffered, defer: false)
         panel.title = isNew ? "New Sticky Note" : "Edit Sticky Note"
@@ -36,6 +39,11 @@ final class EditorController: NSWindowController, NSWindowDelegate {
         let paper = PaperView(frame: panel.contentView!.bounds)
         paper.showsFold = false
         paper.onDrag = { [weak panel] event in panel?.performDrag(with: event) }
+        paper.onResize = { [weak self, weak panel] event, edges in
+            guard let panel else { return }
+            resizePaperWindow(panel, event: event, edges: edges, minimum: NSSize(width: 380, height: 240))
+            self?.onResize?(panel.frame.size)
+        }
         panel.contentView = paper
 
         let title = NSTextField(labelWithString: isNew ? "NEW NOTE" : "YOUR NOTE")
@@ -50,10 +58,12 @@ final class EditorController: NSWindowController, NSWindowDelegate {
         finishButton.font = .systemFont(ofSize: 12, weight: .medium)
         finishButton.contentTintColor = Paper.ink
         finishButton.frame = NSRect(x: 250, y: 10, width: 132, height: 26)
+        finishButton.autoresizingMask = [.minXMargin]
         finishButton.toolTip = "Place on desktop (⌘Return or Esc)"
         paper.addSubview(finishButton)
 
         let scroll = NSScrollView(frame: NSRect(x: 22, y: 47, width: 356, height: 245))
+        scroll.autoresizingMask = [.width, .height]
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -64,8 +74,8 @@ final class EditorController: NSWindowController, NSWindowDelegate {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         scroll.documentView = textView
         paper.addSubview(scroll)
-        textView.setBody(note.body)
-        textView.onChange = { [weak self] in self?.onChange?($0) }
+        textView.setBody(note.body, richText: note.richText)
+        textView.onChange = { [weak self] in self?.onChange?($0, $1) }
         textView.onFinish = { [weak self] in self?.finish() }
 
         let checkbox = NSButton(title: "☐  Checkbox", target: textView, action: #selector(NoteTextView.addCheckbox))
@@ -74,17 +84,29 @@ final class EditorController: NSWindowController, NSWindowDelegate {
         checkbox.contentTintColor = Paper.ink
         checkbox.font = .systemFont(ofSize: 12)
         checkbox.frame = NSRect(x: 17, y: 306, width: 105, height: 28)
+        checkbox.autoresizingMask = [.minYMargin]
         checkbox.toolTip = "Toggle checkbox on this line (⇧⌘L)"
         checkbox.setAccessibilityLabel("Add checkbox")
         paper.addSubview(checkbox)
 
+        let bold = Paper.button("bold", label: "Bold (⌘B)", target: textView, action: #selector(NoteTextView.toggleBold))
+        bold.frame = NSRect(x: 122, y: 307, width: 26, height: 28)
+        bold.autoresizingMask = [.minYMargin]
+        paper.addSubview(bold)
+        let italic = Paper.button("italic", label: "Italic (⌘I)", target: textView, action: #selector(NoteTextView.toggleItalic))
+        italic.frame = NSRect(x: 154, y: 307, width: 26, height: 28)
+        italic.autoresizingMask = [.minYMargin]
+        paper.addSubview(italic)
+
         footer.font = .systemFont(ofSize: 10)
         footer.textColor = Paper.mutedInk
-        footer.frame = NSRect(x: 138, y: 315, width: 190, height: 16)
+        footer.frame = NSRect(x: 194, y: 315, width: 135, height: 16)
+        footer.autoresizingMask = [.minYMargin, .width]
         paper.addSubview(footer)
 
         let delete = Paper.button("trash", label: "Delete note", target: self, action: #selector(deleteNote))
         delete.frame = NSRect(x: 348, y: 307, width: 28, height: 28)
+        delete.autoresizingMask = [.minXMargin, .minYMargin]
         paper.addSubview(delete)
         panel.initialFirstResponder = textView
     }
@@ -94,8 +116,9 @@ final class EditorController: NSWindowController, NSWindowDelegate {
     func show(on screen: NSScreen) {
         guard let window else { return }
         let area = screen.visibleFrame
+        window.setContentSize(NSSize(width: min(initialSize.width, area.width), height: min(initialSize.height, area.height)))
         window.setFrameOrigin(NSPoint(x: area.midX - window.frame.width / 2,
-                                      y: area.midY - window.frame.height / 2 + 40))
+                                      y: min(area.maxY - window.frame.height, area.midY - window.frame.height / 2 + 40)))
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(textView)
@@ -110,4 +133,9 @@ final class EditorController: NSWindowController, NSWindowDelegate {
     @objc func finish() { onFinish?() }
     @objc private func deleteNote() { onDelete?() }
     func windowShouldClose(_ sender: NSWindow) -> Bool { finish(); return false }
+    func windowDidResize(_ notification: Notification) {
+        guard let scroll = textView.enclosingScrollView else { return }
+        textView.minSize = NSSize(width: 0, height: scroll.contentSize.height)
+        window?.invalidateCursorRects(for: window!.contentView!)
+    }
 }

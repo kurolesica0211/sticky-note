@@ -27,7 +27,7 @@ enum DesktopGeometry {
 final class DesktopController: NSWindowController, NSWindowDelegate {
     let noteID: UUID
     let textView = NoteTextView()
-    var onChange: ((String) -> Void)?
+    var onChange: ((String, Data?) -> Void)?
     var onPlacement: ((Placement) -> Void)?
     var onEdit: (() -> Void)?
     var onDelete: (() -> Void)?
@@ -61,7 +61,7 @@ final class DesktopController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         window.contentView = paper
         paper.onDrag = { [weak self] event in self?.drag(event) }
-        paper.onResize = { [weak self] event in self?.resize(event) }
+        paper.onResize = { [weak self] event, edges in self?.resize(event, edges: edges) }
 
         label.font = .systemFont(ofSize: 9, weight: .semibold)
         label.textColor = Paper.mutedInk
@@ -89,7 +89,7 @@ final class DesktopController: NSWindowController, NSWindowDelegate {
         textView.isEditable = false
         textView.isSelectable = false
         textView.onEdit = { [weak self] in self?.onEdit?() }
-        textView.onChange = { [weak self] in self?.onChange?($0) }
+        textView.onChange = { [weak self] in self?.onChange?($0, $1) }
         scroll.documentView = textView
         paper.addSubview(scroll)
         layout()
@@ -99,7 +99,7 @@ final class DesktopController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func update(_ note: Note) {
-        textView.setBody(note.body)
+        textView.setBody(note.body, richText: note.richText)
         window?.title = "Sticky Note — \(note.title)"
     }
 
@@ -127,17 +127,9 @@ final class DesktopController: NSWindowController, NSWindowDelegate {
         keepOnMainScreen()
     }
 
-    private func resize(_ event: NSEvent) {
+    private func resize(_ event: NSEvent, edges: ResizeEdges) {
         guard let window else { return }
-        let original = window.frame
-        let start = NSEvent.mouseLocation
-        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
-            if next.type == .leftMouseUp { break }
-            let current = NSEvent.mouseLocation
-            let width = max(220, original.width + current.x - start.x)
-            let height = max(160, original.height - current.y + start.y)
-            window.setFrame(NSRect(x: original.minX, y: original.maxY - height, width: width, height: height), display: true)
-        }
+        resizePaperWindow(window, event: event, edges: edges, minimum: NSSize(width: 220, height: 160))
         keepOnMainScreen()
     }
 

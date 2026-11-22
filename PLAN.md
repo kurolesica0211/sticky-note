@@ -1,12 +1,12 @@
-# Sticky Note — version 0.1
+# Sticky Note — version 0.2
 
 ## Agreed behavior
 
 1. Launch by typing “Sticky Note” in Spotlight. A small editor appears over the current app and follows the user across Spaces and full-screen apps while writing.
-2. Use classic yellow paper, plain text, and checkboxes.
+2. Use classic yellow paper, text with bold and italic, and checkboxes. Resize editors and stickers from any edge or corner.
 3. Save locally and place individual notes behind app windows on the desktop.
 4. Keep notes on one Space and the primary display.
-5. Remove notes only with an explicit delete button.
+5. Remove notes only through an explicit delete button or keyboard command in a searchable picker launched by “Delete Sticky Note” in Spotlight.
 6. Let the user copy durable information into Obsidian.
 7. Add a global capture shortcut later only if it becomes useful.
 
@@ -16,9 +16,11 @@ Use Swift Package Manager and AppKit with no third-party libraries. Build an app
 
 Each desktop note is a borderless paper window at a desktop window level. Stationary window collection behavior keeps it out of ordinary Mission Control movement. All note windows attach to a single desktop anchor. A separate floating editor joins all Spaces, including full-screen apps, without taking the saved desktop notes with it.
 
-Save note IDs, bodies, and positions in one versioned JSON document using atomic replacement. Preserve unreadable files and surface errors rather than initializing over existing data. Store positions relative to the primary display and clamp them when screens change.
+Save note IDs, plain-text bodies, optional RTF formatting, and positions in one versioned JSON document using atomic replacement. Read the original format and write format 2. Preserve unreadable files and surface errors rather than initializing over existing data. Store positions relative to the primary display and clamp them when screens change.
 
 Handle application reopen events to make Spotlight launch a new capture while the app is already running. Use a menu-bar status item for new notes, accessing existing notes, moving the notes' desktop, and quitting.
+
+A small companion app opens `stickynote://delete` in the main app. This makes the delete picker discoverable from Spotlight without requiring the Xcode App Intents metadata toolchain. Build universal arm64/x86_64 bundles with the existing Command Line Tools; distribute both together as an ad-hoc signed DMG and ZIP. A free build is not Apple-notarized, so installation instructions include Apple's Open Anyway flow.
 
 ## Validation priorities
 
@@ -36,4 +38,4 @@ Restoring a specific Space number after the app quits is not supported by public
 
 ## Later, only if needed
 
-Configurable global capture shortcut, launch at login, additional paper colors, and improved placement when many notes accumulate. Rich text, sync, folders, reminders, and Obsidian integration are outside version 0.1.
+Configurable global capture shortcut, launch at login, additional paper colors, and improved placement when many notes accumulate. Sync, folders, reminders, and Obsidian integration remain outside the scope.

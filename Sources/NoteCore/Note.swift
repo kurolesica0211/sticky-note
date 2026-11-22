@@ -28,8 +28,9 @@ public struct Note: Codable, Identifiable, Equatable {
     public var id: UUID
     public var body: String
     public var placement: Placement
-    public init(id: UUID = UUID(), body: String = "", placement: Placement = Placement()) {
-        self.id = id; self.body = body; self.placement = placement
+    public var richText: Data?
+    public init(id: UUID = UUID(), body: String = "", placement: Placement = Placement(), richText: Data? = nil) {
+        self.id = id; self.body = body; self.placement = placement; self.richText = richText
     }
     public var isEmpty: Bool { body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var title: String {
@@ -72,7 +73,7 @@ public struct NoteStore {
     public func load() throws -> [Note] {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
         let document = try JSONDecoder().decode(Document.self, from: Data(contentsOf: fileURL))
-        guard document.version == 1 else { throw StoreError.unsupportedVersion(document.version) }
+        guard (1...2).contains(document.version) else { throw StoreError.unsupportedVersion(document.version) }
         return document.notes
     }
     public func save(_ notes: [Note]) throws {
@@ -81,7 +82,7 @@ public struct NoteStore {
                                                attributes: [.posixPermissions: 0o700])
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(Document(version: 1, notes: notes)).write(to: fileURL, options: .atomic)
+        try encoder.encode(Document(version: 2, notes: notes)).write(to: fileURL, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 }
