@@ -7,6 +7,7 @@ Open **Sticky Note** from Spotlight, write in a small editor over your current a
 ## First version
 
 - Classic yellow paper with a quiet menu-bar icon.
+- The open editor follows you across desktop Spaces and full-screen apps. You can switch the app underneath it while writing; saved stickers remain on their chosen desktop.
 - Plain text and clickable checkboxes. Use the Checkbox button or **Shift–Command–L**. Return continues a checklist; Return on an empty checkbox ends it.
 - **Command–Return** or **Escape** places the note on the desktop and returns to the previous app.
 - Click the note text or pencil to edit it. Drag the top strip to move it. Drag the folded bottom-right corner to resize it.

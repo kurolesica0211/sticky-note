@@ -2,7 +2,7 @@
 
 ## Agreed behavior
 
-1. Launch by typing “Sticky Note” in Spotlight. A small editor appears over the current app.
+1. Launch by typing “Sticky Note” in Spotlight. A small editor appears over the current app and follows the user across Spaces and full-screen apps while writing.
 2. Use classic yellow paper, plain text, and checkboxes.
 3. Save locally and place individual notes behind app windows on the desktop.
 4. Keep notes on one Space and the primary display.
@@ -14,7 +14,7 @@
 
 Use Swift Package Manager and AppKit with no third-party libraries. Build an application bundle using the existing Command Line Tools. Install under the user's Applications folder, with no system-wide installation.
 
-Each desktop note is a borderless paper window at a desktop window level. Stationary window collection behavior keeps it out of ordinary Mission Control movement. All note windows attach to a single desktop anchor. A separate floating editor can move to the current Space without taking the desktop notes with it.
+Each desktop note is a borderless paper window at a desktop window level. Stationary window collection behavior keeps it out of ordinary Mission Control movement. All note windows attach to a single desktop anchor. A separate floating editor joins all Spaces, including full-screen apps, without taking the saved desktop notes with it.
 
 Save note IDs, bodies, and positions in one versioned JSON document using atomic replacement. Preserve unreadable files and surface errors rather than initializing over existing data. Store positions relative to the primary display and clamp them when screens change.
 
