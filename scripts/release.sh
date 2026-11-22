@@ -4,10 +4,13 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 ./scripts/build.sh --universal
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
-PACKAGE_DIR="$PROJECT_DIR/.build/package/Sticky Note"
+STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sticky-note-package.XXXXXX")"
+trap 'rm -rf "$STAGING_DIR"' EXIT
+PACKAGE_DIR="$STAGING_DIR/Sticky Note"
 mkdir -p "$PACKAGE_DIR" dist
 for NAME in "Sticky Note" "Delete Sticky Note"; do
-    ditto "dist/$NAME.app" "$PACKAGE_DIR/$NAME.app"
+    ditto --noextattr --norsrc "dist/$NAME.app" "$PACKAGE_DIR/$NAME.app"
+    codesign --verify --deep --strict "$PACKAGE_DIR/$NAME.app"
 done
 cp Resources/Install.txt "$PACKAGE_DIR/Read Me.txt"
 xattr -cr "$PACKAGE_DIR"
